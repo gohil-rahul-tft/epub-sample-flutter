@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 class EpubHelper {
   void parseEPUB() async {
-    const fileName = "table.epub";
+    const fileName = "urdu_sample.epub";
 
     Directory tempDir = await getApplicationSupportDirectory();
     String fullPath = "${tempDir.path}/$fileName";
