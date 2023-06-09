@@ -1,7 +1,5 @@
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:epub_parser/epub_parser.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart' show ByteData, rootBundle;
 import 'package:flutter_archive/flutter_archive.dart';
@@ -43,92 +41,87 @@ class EpubHelper {
     return extractFolder;
   }
 
-  Future<String?> findContentFolder(String epubPath) async {
+  Future<List<String>?> getFileContents(String epubPath) async {
     final containerPath = '$epubPath/META-INF/container.xml';
 
     // Read container.xml file
-    final containerFile = File(containerPath);
-    final containerXml = XmlDocument.parse(await containerFile.readAsString());
-    final rootFiles = containerXml.findAllElements('rootfile');
+    final opfFilePath = await getOpfFilePath(containerPath);
 
-    if (rootFiles.isNotEmpty) {
-      final rootFile = rootFiles.first;
-      final packagePath = rootFile.getAttribute('full-path');
-
+    if (opfFilePath.isNotEmpty) {
       // Read package.opf file
-      final packageFile = File('$epubPath/$packagePath');
-      final packageXml = XmlDocument.parse(await packageFile.readAsString());
-      final manifest = packageXml.findAllElements('manifest');
+      final opfFilePathAfterSplit = opfFilePath.contains('/') ? opfFilePath.split('/').first : '';
 
-      if (manifest.isNotEmpty) {
-        final manifestElem = manifest.first;
-        String? contentFolder;
+      final opfFile = File('$epubPath/$opfFilePath');
+      final opfFileXml = XmlDocument.parse(await opfFile.readAsString());
 
-        for (var item in manifestElem.children) {
-          final id = item.getAttribute('id');
-          final href = item.getAttribute('href');
-          final mediaType = item.getAttribute('media-type');
+      // Find the manifest element
+      final manifestElement =
+          opfFileXml.rootElement.findElements('manifest').first;
 
-          debugPrint("ID: $id - href: $href - mediaType: $mediaType");
+      // Find the spine element
+      final spineElement = opfFileXml.rootElement.findElements('spine').first;
 
-          if (href != null) {
-            final folder = Uri.parse(href).pathSegments[0];
+      // Get the idRef values in the spine element
+      final idRefs = spineElement
+          .findElements('itemref')
+          .map((itemRef) => itemRef.getAttribute('idref'))
+          .toList();
 
-            debugPrint("CONTENT FOLDER: $folder");
+      // Retrieve the href values based on idRef
+      final hrefs = idRefs.map((idRef) {
+        final item = manifestElement.findElements('item').firstWhere((item) {
+          return item.getAttribute('id') == idRef;
+        });
+        return "$epubPath/$opfFilePathAfterSplit/${item.getAttribute('href')}" ?? "";
+      }).toList();
 
-            // Store the content folder path in a variable
-            contentFolder = folder;
-          }
-        }
-
-        return contentFolder;
-      }
+      return hrefs;
     }
 
     return null;
   }
 
-  Future<String?> getOpfFilePath(String epubPath) async {
-    final containerPath = '$epubPath/META-INF/container.xml';
-
+  Future<String> getOpfFilePath(String containerPath) async {
     // Read container.xml file
     final containerFile = File(containerPath);
     final containerXml = XmlDocument.parse(await containerFile.readAsString());
 
     // Find the rootfile element
-    final rootfileElement = containerXml.findElements('rootfile').first;
+    final rootFileElement =
+        containerXml.findAllElements('rootfile').firstOrNull;
 
     // Retrieve the full path of the .opf file
-    final opfFilePath = rootfileElement.getAttribute('full-path');
+    final opfFilePath = rootFileElement?.getAttribute('full-path');
 
     debugPrint("OPF FILE PATH : $opfFilePath");
 
-    return opfFilePath;
+    return opfFilePath ?? "";
   }
 
-  void parseEPUB() async {
-    const fileName = "urdu_sample.epub";
+  Future<List<String>> parseEPUB({String bookName = "alice.epub"}) async {
 
     Directory tempDir = await getFileDirectory();
-    String fullPath = "${tempDir.path}/$fileName";
+    String fullPath = "${tempDir.path}/$bookName";
 
-    ByteData assetData = await rootBundle.load("assets/book/$fileName");
+    ByteData assetData = await rootBundle.load("assets/book/$bookName");
     final buffer = assetData.buffer;
-    File file = await File(fullPath).writeAsBytes(
+    await File(fullPath).writeAsBytes(
       buffer.asUint8List(assetData.offsetInBytes, assetData.lengthInBytes),
       flush: true,
     );
 
-    final path = await unZip(fileName);
+    final path = await unZip(bookName);
     debugPrint("PATH IS $path");
     // Find the content folder
-    final contentFolder = await findContentFolder(path);
+    final files = await getFileContents(path);
 
-    if (contentFolder != null) {
-      debugPrint('The content folder is: $contentFolder');
+    if (files != null) {
+      debugPrint('The content folder is: ${files.toString()}');
+      return files;
     } else {
       debugPrint('Unable to determine the content folder dynamically.');
+      return [];
     }
-    return;
+
   }
 }
